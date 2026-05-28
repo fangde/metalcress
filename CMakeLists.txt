@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.18)
-project(CRESSIM_MPM VERSION 2.2.0 LANGUAGES C CXX CUDA)
+if(APPLE)
+    project(CRESSIM_MPM VERSION 2.2.0 LANGUAGES C CXX OBJCXX)
+else()
+    project(CRESSIM_MPM VERSION 2.2.0 LANGUAGES C CXX CUDA)
+endif()
 
 set(PROJECT_VENDOR "Yafei Ou")
 set(PROJECT_DESCRIPTION "CRESSim-MPM: A Material Point Method Library for Surgical Soft Body Simulation with Cutting and Suturing")
@@ -20,18 +24,22 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
-if(UNIX)
+if(UNIX AND NOT APPLE)
     set(CMAKE_C_COMPILER "gcc")
     set(CMAKE_CXX_COMPILER "g++")
 endif()
 
-enable_language(CUDA)
+if(APPLE)
+    add_compile_definitions(CR_USE_METAL)
+else()
+    enable_language(CUDA)
 
-# All GPUs supported by CUDA Toolkit 12.0 - 12.6
-# CUDA arch 100 and 120 require CUDA Toolkit 12.8
-set(CUDA_ARCH_LIST 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
-set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST} CACHE STRING "List of CUDA architectures to build for")
-set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
+    # All GPUs supported by CUDA Toolkit 12.0 - 12.6
+    # CUDA arch 100 and 120 require CUDA Toolkit 12.8
+    set(CUDA_ARCH_LIST 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
+    set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST} CACHE STRING "List of CUDA architectures to build for")
+    set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
+endif()
 
 option(ENABLE_DEBUG_LOGGER "Enable debug logger" ON)
 option(ENABLE_EXAMPLES "Enable examples" ON)
@@ -41,7 +49,7 @@ option(ENGINE_STATIC "Build the engine as a static library"  ON)
 set(EIGEN3_INCLUDE_DIR "" CACHE PATH "Path to Eigen3 include directory")
 set(GLFW_LIBRARY_DIR "" CACHE PATH "Path to the directory containing GLFW .lib/.dll files on Windows")
 
-set_property(DIRECTORY PROPERTY COMPILE_DEFINITIONS
+add_compile_definitions(
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CONFIG:Release>:NDEBUG>
 )

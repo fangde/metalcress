@@ -24,16 +24,31 @@ file(GLOB_RECURSE INTERNAL_HEADER
     ${PROJECT_SOURCE_DIR}/src/utils/*.cuh
 )
 
-file(GLOB_RECURSE PROJECT_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/core/*.cu
-    ${PROJECT_SOURCE_DIR}/src/core/*.cpp
-    ${PROJECT_SOURCE_DIR}/src/solver/*.cu
-    ${PROJECT_SOURCE_DIR}/src/solver/*.cpp
-    ${PROJECT_SOURCE_DIR}/src/engine/*.cu
-    ${PROJECT_SOURCE_DIR}/src/engine/*.cpp
-    ${PROJECT_SOURCE_DIR}/src/geometry_utils/*.cu
-    ${PROJECT_SOURCE_DIR}/src/geometry_utils/*.cpp
-)
+if(APPLE)
+    file(GLOB_RECURSE PROJECT_SOURCES
+        ${PROJECT_SOURCE_DIR}/src/core/*.mm
+        ${PROJECT_SOURCE_DIR}/src/core/*.cpp
+        ${PROJECT_SOURCE_DIR}/src/solver/*.mm
+        ${PROJECT_SOURCE_DIR}/src/solver/*.cpp
+        ${PROJECT_SOURCE_DIR}/src/engine/*.mm
+        ${PROJECT_SOURCE_DIR}/src/engine/*.cpp
+        ${PROJECT_SOURCE_DIR}/src/geometry_utils/*.mm
+        ${PROJECT_SOURCE_DIR}/src/geometry_utils/*.cpp
+        ${PROJECT_SOURCE_DIR}/src/utils/*.mm
+        ${PROJECT_SOURCE_DIR}/src/utils/*.cpp
+    )
+else()
+    file(GLOB_RECURSE PROJECT_SOURCES
+        ${PROJECT_SOURCE_DIR}/src/core/*.cu
+        ${PROJECT_SOURCE_DIR}/src/core/*.cpp
+        ${PROJECT_SOURCE_DIR}/src/solver/*.cu
+        ${PROJECT_SOURCE_DIR}/src/solver/*.cpp
+        ${PROJECT_SOURCE_DIR}/src/engine/*.cu
+        ${PROJECT_SOURCE_DIR}/src/engine/*.cpp
+        ${PROJECT_SOURCE_DIR}/src/geometry_utils/*.cu
+        ${PROJECT_SOURCE_DIR}/src/geometry_utils/*.cpp
+    )
+endif()
 
 if(ENGINE_STATIC)
     add_library(crmpm_engine STATIC ${PROJECT_SOURCES})
@@ -72,7 +87,9 @@ source_group(
     FILES ${PROJECT_SOURCES}
 )
 
-target_include_directories(crmpm_engine PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+if(NOT APPLE)
+    target_include_directories(crmpm_engine PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+endif()
 target_include_directories(crmpm_engine PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(crmpm_engine PUBLIC ${PROJECT_SOURCE_DIR}/include/core)
 target_include_directories(crmpm_engine PUBLIC ${PROJECT_SOURCE_DIR}/include/math)
@@ -88,7 +105,11 @@ target_include_directories(crmpm_engine PRIVATE ${PROJECT_SOURCE_DIR}/src/utils)
 
 target_include_directories(crmpm_engine PRIVATE ${PROJECT_SOURCE_DIR}/extern)
 
-target_link_libraries(crmpm_engine PRIVATE cudart_static)
+if(APPLE)
+    target_link_libraries(crmpm_engine PRIVATE "-framework Metal" "-framework MetalKit" "-framework Foundation" "-framework Cocoa")
+else()
+    target_link_libraries(crmpm_engine PRIVATE cudart_static)
+endif()
 
 set_target_properties(crmpm_engine
     PROPERTIES

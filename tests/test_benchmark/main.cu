@@ -39,6 +39,7 @@
 #include <device_launch_parameters.h>
 #endif // _MSC_VER
 
+#ifndef CR_USE_METAL
 __global__ void warmupKernel() {
     // A dummy kernel that does nothing meaningful
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -46,8 +47,10 @@ __global__ void warmupKernel() {
         // Simple statement to ensure some work happens
     }
 }
+#endif
 
 void warmupCUDA() {
+#ifndef CR_USE_METAL
     // Launch the warmup kernel with a minimal configuration
     warmupKernel << <1, 1 >> > ();
 
@@ -62,6 +65,9 @@ void warmupCUDA() {
     else {
         std::cout << "CUDA warmup kernel completed successfully." << std::endl;
     }
+#else
+    std::cout << "Metal warmup: no CUDA warmup needed." << std::endl;
+#endif
 }
 
 

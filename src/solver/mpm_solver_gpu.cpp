@@ -27,7 +27,11 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#ifndef CR_USE_METAL
 #include <cuda_runtime.h>
+#else
+#include "metal_backend.h"
+#endif
 
 #include "mpm_solver_gpu.h"
 #include "check_cuda.cuh"

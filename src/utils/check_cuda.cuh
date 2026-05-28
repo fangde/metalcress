@@ -32,6 +32,12 @@
 #ifndef CR_CHECK_CUDA_CUH
 #define CR_CHECK_CUDA_CUH
 
+#ifdef CR_USE_METAL
+#include "metal_backend.h"
+#else
+#include <cuda_runtime.h>
+#endif
+
 #define CR_CHECK_CUDA(call)                                        \
     {                                                              \
         const cudaError_t error = call;                            \

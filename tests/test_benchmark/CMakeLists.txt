@@ -10,6 +10,10 @@ file(GLOB_RECURSE TARGET_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
 )
 
+if(APPLE)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/main.cu PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x c++")
+endif()
+
 add_executable(${TARGET_NAME} ${TARGET_SRC} ${COMMON_SRC})
 
 target_sources(${TARGET_NAME} PRIVATE ${PROJECT_HEADER} ${COMMON_HEADER} ${TARGET_HEADER})
