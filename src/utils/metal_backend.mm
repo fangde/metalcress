@@ -180,7 +180,20 @@ extern "C" {
     }
 
     cudaError_t cudaMemsetAsync(void* devPtr, int value, size_t count, cudaStream_t stream) {
-        return cudaMemset(devPtr, value, count);
+        if (!devPtr) return cudaErrorUnknown;
+        if (stream) {
+            size_t offset = 0;
+            id<MTLBuffer> mtlBuf = crmpm::metal::getBufferForPointer(devPtr, &offset);
+            if (mtlBuf) {
+                id<MTLCommandBuffer> buf = stream->currentCommandBuffer;
+                id<MTLBlitCommandEncoder> blit = [buf blitCommandEncoder];
+                [blit fillBuffer:mtlBuf range:NSMakeRange(offset, count) value:(uint8_t)value];
+                [blit endEncoding];
+                return cudaSuccess;
+            }
+        }
+        std::memset(devPtr, value, count);
+        return cudaSuccess;
     }
 
     cudaError_t cudaMemcpy(void* dst, const void* src, size_t count, cudaMemcpyKind kind) {
@@ -190,7 +203,23 @@ extern "C" {
     }
 
     cudaError_t cudaMemcpyAsync(void* dst, const void* src, size_t count, cudaMemcpyKind kind, cudaStream_t stream) {
-        return cudaMemcpy(dst, src, count, kind);
+        if (!dst || !src) return cudaErrorUnknown;
+        if (stream) {
+            size_t dstOffset = 0, srcOffset = 0;
+            id<MTLBuffer> dstBuf = crmpm::metal::getBufferForPointer(dst, &dstOffset);
+            id<MTLBuffer> srcBuf = crmpm::metal::getBufferForPointer(src, &srcOffset);
+            if (dstBuf && srcBuf) {
+                id<MTLCommandBuffer> buf = stream->currentCommandBuffer;
+                id<MTLBlitCommandEncoder> blit = [buf blitCommandEncoder];
+                [blit copyFromBuffer:srcBuf sourceOffset:srcOffset toBuffer:dstBuf destinationOffset:dstOffset size:count];
+                [blit endEncoding];
+                return cudaSuccess;
+            } else {
+                cudaStreamSynchronize(stream);
+            }
+        }
+        std::memmove(dst, src, count);
+        return cudaSuccess;
     }
 
     cudaError_t cudaStreamCreate(cudaStream_t* pStream) {

@@ -62,9 +62,11 @@ public:
                            const std::vector<unsigned int> &indices,
                            const Eigen::Vector3f &position,
                            const Eigen::Matrix3f &rotation,
-                           const Eigen::Vector3f &scale);
+                           const Eigen::Vector3f &scale,
+                           const Eigen::Vector4f &color = Eigen::Vector4f(1.0f, 1.0f, 0.0f, 1.0f));
 
-    void drawParticles(const std::vector<float> &positions);
+    void drawParticles(const std::vector<float> &positions,
+                       const Eigen::Vector4f &color = Eigen::Vector4f(0.5f, 0.5f, 1.0f, 1.0f));
 
     // Retrieve the GLFW window pointer (if needed for other operations)
     GLFWwindow *getWindow() const { return mWindow; }

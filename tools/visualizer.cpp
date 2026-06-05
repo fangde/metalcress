@@ -76,20 +76,21 @@ uniform mat4 view;
 uniform mat4 projection;
 void main() {
     gl_Position = projection * view * vec4(aPos, 1.0);
-    gl_PointSize = 2.0;
+    gl_PointSize = 8.0;
 }
 )";
 
 const char *fragmentShaderSourceParticles = R"(
 #version 330 core
 out vec4 FragColor;
+uniform vec4 color;
 void main() {
     vec2 coord = gl_PointCoord - vec2(0.5);
     float dist = length(coord);
     if (dist > 0.5) {
         discard;
     }
-    FragColor = vec4(0.5, 0.5, 1.0, 1.0);
+    FragColor = color;
 }
 )";
 
@@ -98,6 +99,15 @@ const char *fragmentShaderSourceGrid = R"(
 out vec4 FragColor;
 void main() {
     FragColor = vec4(0.3, 0.3, 0.3, 1.0);
+}
+)";
+
+const char *fragmentShaderSourceWireframe = R"(
+#version 330 core
+out vec4 FragColor;
+uniform vec4 color;
+void main() {
+    FragColor = color;
 }
 )";
 
@@ -228,7 +238,7 @@ void Visualizer::initShaders()
 {
     mParticleShaderProgram = createShaderProgram(vertexShaderSource, fragmentShaderSourceParticles);
     mGridShaderProgram = createShaderProgram(vertexShaderSource, fragmentShaderSourceGrid);
-    mWireframeShaderProgram = createShaderProgram(vertexShaderSourceTrimeshWireframe, fragmentShaderSourceGrid);
+    mWireframeShaderProgram = createShaderProgram(vertexShaderSourceTrimeshWireframe, fragmentShaderSourceWireframe);
 }
 
 // Create grid vertex data and upload it to the GPU.
@@ -351,7 +361,8 @@ void Visualizer::drawMeshWireframe(const std::vector<float> &vertices,
                                    const std::vector<unsigned int> &indices,
                                    const Eigen::Vector3f &position,
                                    const Eigen::Matrix3f &rotation,
-                                   const Eigen::Vector3f &scale)
+                                   const Eigen::Vector3f &scale,
+                                   const Eigen::Vector4f &color)
 {
     // Create temporary OpenGL objects for the mesh.
     GLuint meshVAO, meshVBO, meshEBO;
@@ -391,9 +402,11 @@ void Visualizer::drawMeshWireframe(const std::vector<float> &vertices,
     GLint modelLoc = glGetUniformLocation(mWireframeShaderProgram, "model");
     GLint viewLoc = glGetUniformLocation(mWireframeShaderProgram, "view");
     GLint projLoc = glGetUniformLocation(mWireframeShaderProgram, "projection");
+    GLint colorLoc = glGetUniformLocation(mWireframeShaderProgram, "color");
     glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model.data());
     glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view.data());
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection.data());
+    glUniform4fv(colorLoc, 1, color.data());
 
     // Set polygon mode to wireframe.
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
@@ -413,7 +426,8 @@ void Visualizer::drawMeshWireframe(const std::vector<float> &vertices,
     glDeleteVertexArrays(1, &meshVAO);
 }
 
-void Visualizer::drawParticles(const std::vector<float> &positions)
+void Visualizer::drawParticles(const std::vector<float> &positions,
+                               const Eigen::Vector4f &color)
 {
     glBindBuffer(GL_ARRAY_BUFFER, mParticleVBO);
     glBufferData(GL_ARRAY_BUFFER, positions.size() * sizeof(float), positions.data(), GL_DYNAMIC_DRAW);
@@ -427,8 +441,10 @@ void Visualizer::drawParticles(const std::vector<float> &positions)
     glUseProgram(mParticleShaderProgram);
     GLint viewLoc = glGetUniformLocation(mParticleShaderProgram, "view");
     GLint projLoc = glGetUniformLocation(mParticleShaderProgram, "projection");
+    GLint colorLoc = glGetUniformLocation(mParticleShaderProgram, "color");
     glUniformMatrix4fv(viewLoc, 1, GL_FALSE, view.data());
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, projection.data());
+    glUniform4fv(colorLoc, 1, color.data());
     glBindVertexArray(mParticleVAO);
     GLint particleCount = 0;
     glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &particleCount);

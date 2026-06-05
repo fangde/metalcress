@@ -392,9 +392,9 @@ inline void svd3(float3x3 a, thread float3x3 &u, thread float3x3 &vt, thread flo
         float3(u13, u23, u33)
     );
     vt = float3x3(
-        float3(v11, v21, v31),
-        float3(v12, v22, v32),
-        float3(v13, v23, v33)
+        float3(v11, v12, v13),
+        float3(v21, v22, v23),
+        float3(v31, v32, v33)
     );
     sigma = float3x3(
         float3(sigma1, 0.0f, 0.0f),
@@ -625,13 +625,20 @@ inline void resolveRigidCollision(
     device const float3* shapeInvScale, device const float4* shapeParams0,
     device const int* geomType, device const float4* geomParams0,
     device const int3* sdfDimension, device const float4* sdfLowerBoundCellSize,
-    device const float4* sdfGridData
+    device const float4* sdfGridData,
+    bool isParticle
 ) {
     for (int idx = 0; idx < numShapes; idx++) {
         int shapeId = shapeIds[idx];
         int type = shapeType[shapeId];
         int geomId = shapeGeometryIdx[shapeId];
         int gType = geomType[geomId];
+
+        if (isParticle) {
+            if (gType == 7 || gType == 8) { // eConnectedLineSegments or eArc
+                continue;
+            }
+        }
 
         float3 shPos = shapePosition[shapeId];
         float4 shRot = shapeRotation[shapeId];
@@ -655,28 +662,37 @@ inline void resolveRigidCollision(
 
         if (isnan(dist)) continue;
 
+        // Scale distance to world units
+        float3 grad = sdfRes.xyz * shInvSc;
+        float grad_len = length(grad);
+        float invScale = 1.0f / max(grad_len, CR_EPS);
+        dist = dist * invScale;
+        grad *= invScale;
+
         dist -= shParams0.w; // Fatten SDF
-        float smoothDist = shParams0.x;
+        float smoothDist = isParticle ? 0.0f : shParams0.x;
 
         if (dist < smoothDist) {
             // Transform normal back to world
-            float3 grad = sdfRes.xyz * shInvSc;
-            float grad_len = length(grad);
-            grad /= max(grad_len, CR_EPS);
             float3 normal = grad + 2.0f * cross(q_xyz, cross(q_xyz, grad) + q_w * grad); // rotate
 
-            float normalVel = dot(velocity.xyz, normal);
-            if (normalVel < 0.0f) {
-                float friction = shParams0.z;
-                if (inSpine) friction = 1e2f;
+            if (isParticle) {
+                float inside = min(dist, 0.0f);
+                position.xyz -= normal * inside;
+            } else {
+                float normalVel = dot(velocity.xyz, normal);
+                if (normalVel < 0.0f) {
+                    float friction = shParams0.z;
+                    if (inSpine) friction = 1e2f;
 
-                float3 tangential = velocity.xyz - normal * normalVel;
-                float tangentNorm = length(tangential);
-                float frictionCorr = max(friction * normalVel / (tangentNorm + CR_EPS), -1.0f);
+                    float3 tangential = velocity.xyz - normal * normalVel;
+                    float tangentNorm = length(tangential);
+                    float frictionCorr = max(friction * normalVel / (tangentNorm + CR_EPS), -1.0f);
 
-                float3 response = tangential + tangential * frictionCorr;
-                response *= shParams0.y; // damping/drag coefficient (stickyScale)
-                velocity.xyz = response;
+                    float3 response = tangential + tangential * frictionCorr;
+                    response *= shParams0.y; // damping/drag coefficient (stickyScale)
+                    velocity.xyz = response;
+                }
             }
         }
     }
@@ -724,7 +740,7 @@ kernel void standardMpmComputeInitialGridMassKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][i] * w[1][j] * w[2][k];
+                float weight = w[i].x * w[j].y * w[k].z;
                 float weightedMass = weight * pPosMass.w;
 
                 device float* basePtr = (device float*)&nodeMomentumVelocityMass[nodeIdx];
@@ -775,7 +791,7 @@ kernel void standardMpmComputeInitialVolumeKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][i] * w[1][j] * w[2][k];
+                float weight = w[i].x * w[j].y * w[k].z;
                 float nodeDensity = nodeMomentumVelocityMass[nodeIdx].w / gridVolume;
                 density += nodeDensity * weight;
             }
@@ -835,11 +851,11 @@ kernel void standardMpmParticleToGridKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][i] * w[1][j] * w[2][k];
+                float weight = w[i].x * w[j].y * w[k].z;
                 float3 weightGrad = float3(
-                    dw[0][i] * w[1][j] * w[2][k],
-                    w[0][i] * dw[1][j] * w[2][k],
-                    w[0][i] * w[1][j] * dw[2][k]
+                    dw[i].x * w[j].y * w[k].z,
+                    w[i].x * dw[j].y * w[k].z,
+                    w[i].x * w[j].y * dw[k].z
                 );
 
                 float weightedMass = weight * mass;
@@ -924,7 +940,8 @@ kernel void standardMpmUpdateGridKernel(
     resolveRigidCollision(
         velMass, pos, numShapes, shapeIds,
         shapeType, shapeGeometryIdx, shapePosition, shapeRotation, shapeInvScale, shapeParams0,
-        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData
+        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData,
+        false
     );
 
     // Boundary conditions
@@ -990,15 +1007,15 @@ kernel void standardMpmGridToParticleKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][i] * w[1][j] * w[2][k];
+                float weight = w[i].x * w[j].y * w[k].z;
                 float3 nodeVel = nodeMomentumVelocityMass[nodeIdx].xyz;
 
                 pVel += nodeVel * weight;
 
                 float3 weightGrad = float3(
-                    dw[0][i] * w[1][j] * w[2][k],
-                    w[0][i] * dw[1][j] * w[2][k],
-                    w[0][i] * w[1][j] * dw[2][k]
+                    dw[i].x * w[j].y * w[k].z,
+                    w[i].x * dw[j].y * w[k].z,
+                    w[i].x * w[j].y * dw[k].z
                 );
                 // Outer product: gradVel += weightGrad * nodeVel^T
                 gradVel += float3x3(weightGrad * nodeVel.x, weightGrad * nodeVel.y, weightGrad * nodeVel.z);
@@ -1014,7 +1031,8 @@ kernel void standardMpmGridToParticleKernel(
     resolveRigidCollision(
         pPosMass, pPosMass, numShapes, shapeIds,
         shapeType, shapeGeometryIdx, shapePosition, shapeRotation, shapeInvScale, shapeParams0,
-        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData
+        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData,
+        true
     );
     particlePositionMass[idx] = pPosMass;
 
@@ -1069,7 +1087,7 @@ kernel void mlsMpmComputeInitialGridMassKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float weightedMass = weight * pPosMass.w;
 
                 device float* basePtr = (device float*)&nodeMomentumVelocityMass[nodeIdx];
@@ -1121,7 +1139,7 @@ kernel void mlsMpmComputeInitialVolumeKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float nodeDensity = nodeMomentumVelocityMass[nodeIdx].w / cellVolume;
                 density += nodeDensity * weight;
             }
@@ -1191,7 +1209,7 @@ kernel void mlsMpmParticleToGridKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float3 xi_minus_xp = (float3(coord) * cellSize + gridBoundMin) - pPosMass.xyz;
 
                 // Affine stress force term and momentum calculation
@@ -1261,7 +1279,8 @@ kernel void mlsMpmUpdateGridKernel(
     resolveRigidCollision(
         velMass, pos, numShapes, shapeIds,
         shapeType, shapeGeometryIdx, shapePosition, shapeRotation, shapeInvScale, shapeParams0,
-        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData
+        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData,
+        false
     );
 
     // Boundary conditions
@@ -1330,7 +1349,7 @@ kernel void mlsMpmGridToParticleKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float4 nodeMomentumMass = nodeMomentumVelocityMass[nodeIdx];
                 if (nodeMomentumMass.w < 1e-4f) continue;
 
@@ -1338,7 +1357,7 @@ kernel void mlsMpmGridToParticleKernel(
                 pVel += nodeVel * weight;
 
                 float3 xi_minus_xp = (float3(coord) * cellSize + gridBoundMin) - pPosMass.xyz;
-                B += float3x3(xi_minus_xp * nodeVel.x, xi_minus_xp * nodeVel.y, xi_minus_xp * nodeVel.z) * (weight * 4.0f * invCellSize * invCellSize);
+                B += float3x3(nodeVel * xi_minus_xp.x, nodeVel * xi_minus_xp.y, nodeVel * xi_minus_xp.z) * (weight * 4.0f * invCellSize * invCellSize);
             }
         }
     }
@@ -1351,7 +1370,8 @@ kernel void mlsMpmGridToParticleKernel(
     resolveRigidCollision(
         pPosMass, pPosMass, numShapes, shapeIds,
         shapeType, shapeGeometryIdx, shapePosition, shapeRotation, shapeInvScale, shapeParams0,
-        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData
+        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData,
+        true
     );
     particlePositionMass[idx] = pPosMass;
 
@@ -1410,7 +1430,7 @@ kernel void pbMpmComputeInitialGridMassKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float weightedMass = weight * pPosMass.w;
 
                 device float* basePtr = (device float*)&nodeMomentumVelocityMass[nodeIdx];
@@ -1462,7 +1482,7 @@ kernel void pbMpmComputeInitialVolumeKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float nodeDensity = nodeMomentumVelocityMass[nodeIdx].w / cellVolume;
                 density += nodeDensity * weight;
             }
@@ -1518,7 +1538,7 @@ kernel void pbMpmParticleToGridKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float3 xi_minus_xp = (float3(coord) * cellSize + gridBoundMin) - pPosMass.xyz;
 
                 float3 total_momentum = (velocity + B * xi_minus_xp) * (weight * mass);
@@ -1579,7 +1599,8 @@ kernel void pbMpmUpdateGridKernel(
     resolveRigidCollision(
         velMass, pos, numShapes, shapeIds,
         shapeType, shapeGeometryIdx, shapePosition, shapeRotation, shapeInvScale, shapeParams0,
-        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData
+        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData,
+        false
     );
 
     if (i < 2 || i > numNodesPerDim.x - 3) velMass.x = 0;
@@ -1631,7 +1652,7 @@ kernel void pbMpmGridToParticleKernel(
                     coord.z < 0 || coord.z >= numNodesPerDim.z) continue;
 
                 int nodeIdx = coord.x + coord.y * numNodesPerDim.x + coord.z * numNodesPerDim.x * numNodesPerDim.y;
-                float weight = w[0][ix] * w[1][iy] * w[2][iz];
+                float weight = w[ix].x * w[iy].y * w[iz].z;
                 float4 nodeMomentumMass = nodeMomentumVelocityMass[nodeIdx];
                 if (nodeMomentumMass.w < 1e-4f) continue;
 
@@ -1639,7 +1660,7 @@ kernel void pbMpmGridToParticleKernel(
                 pVel += nodeVel * weight;
 
                 float3 xi_minus_xp = (float3(coord) * cellSize + gridBoundMin) - pPosMass.xyz;
-                B += float3x3(xi_minus_xp * nodeVel.x, xi_minus_xp * nodeVel.y, xi_minus_xp * nodeVel.z) * (weight * 4.0f * invCellSize * invCellSize);
+                B += float3x3(nodeVel * xi_minus_xp.x, nodeVel * xi_minus_xp.y, nodeVel * xi_minus_xp.z) * (weight * 4.0f * invCellSize * invCellSize);
             }
         }
     }
@@ -1717,7 +1738,8 @@ kernel void pbMpmIntegrateParticleKernel(
     resolveRigidCollision(
         pPosMass, pPosMass, numShapes, shapeIds,
         shapeType, shapeGeometryIdx, shapePosition, shapeRotation, shapeInvScale, shapeParams0,
-        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData
+        geomType, geomParams0, sdfDimension, sdfLowerBoundCellSize, sdfGridData,
+        true
     );
     particlePositionMass[idx] = pPosMass;
 

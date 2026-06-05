@@ -117,6 +117,18 @@ int main()
     float timeElapsed = 0;
     bool shouldAddShape = true;
 
+    // Slicer plane mesh data (2x2 quad at Y=0) for rendering
+    std::vector<float> slicerVertices = {
+        -1.0f, 0.0f, -1.0f,
+         1.0f, 0.0f, -1.0f,
+         1.0f, 0.0f,  1.0f,
+        -1.0f, 0.0f,  1.0f
+    };
+    std::vector<unsigned int> slicerIndices = {
+        0, 1, 2,
+        0, 2, 3
+    };
+
     // Main loop
     while (vis.running())
     {
@@ -137,19 +149,52 @@ int main()
 
         // Get particle data
         const crmpm::ParticleData &particles = scene->getParticleData();
+        const unsigned char *activeMask = scene->getActiveMask();
         std::vector<float> positions;
         positions.reserve(particles.size * 3);
 
         for (int i = 0; i < particles.size; i++)
         {
-            const auto position = particles.positionMass[i];
-            positions.push_back(position.x);
-            positions.push_back(position.y);
-            positions.push_back(position.z);
+            if (activeMask[i] != 0)
+            {
+                const auto position = particles.positionMass[i];
+                positions.push_back(position.x);
+                positions.push_back(position.y);
+                positions.push_back(position.z);
+            }
+        }
+
+        static int printCounter = 0;
+        if (printCounter++ % 10 == 0) {
+            std::cout << "[Diagnostics] Frame particles size: " << particles.size 
+                      << ", Allocated: " << scene->getNumAllocatedParticles() << std::endl;
+            if (scene->getNumAllocatedParticles() > 1000) {
+                std::cout << "  P0: (" << particles.positionMass[0].x << ", " 
+                          << particles.positionMass[0].y << ", " 
+                          << particles.positionMass[0].z << ")" << std::endl;
+                std::cout << "  P500: (" << particles.positionMass[500].x << ", " 
+                          << particles.positionMass[500].y << ", " 
+                          << particles.positionMass[500].z << ")" << std::endl;
+                std::cout << "  P1000: (" << particles.positionMass[1000].x << ", " 
+                          << particles.positionMass[1000].y << ", " 
+                          << particles.positionMass[1000].z << ")" << std::endl;
+            }
         }
 
         vis.beginRender();
-        vis.drawParticles(positions);
+        
+        // Draw particles as red spheres
+        vis.drawParticles(positions, Eigen::Vector4f(1.0f, 0.3f, 0.3f, 1.0f));
+
+        // Draw slicer mesh as a yellow wireframe quad
+        Eigen::Quaternionf q(shapeTransform.rotation.data.w, shapeTransform.rotation.data.x, shapeTransform.rotation.data.y, shapeTransform.rotation.data.z);
+        vis.drawMeshWireframe(slicerVertices,
+                              slicerIndices,
+                              Eigen::Vector3f(shapeTransform.position.x(), shapeTransform.position.y(), shapeTransform.position.z()),
+                              q.toRotationMatrix(),
+                              Eigen::Vector3f(1.0f, 1.0f, 1.0f),
+                              Eigen::Vector4f(1.0f, 1.0f, 0.0f, 1.0f));
+
         vis.endRender();
 
         scene->advance(0.02);
